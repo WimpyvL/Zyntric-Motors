@@ -1,0 +1,6 @@
+{
+  "name": "Autoconomy Parts Shop",
+  "description": "Online car parts shop focusing on fitment guarantees, click-and-collect, and speed.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
