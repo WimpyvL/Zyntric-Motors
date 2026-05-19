@@ -1,7 +1,10 @@
 import { useParams, Link } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { ArrowLeft, CheckCircle2, MessageSquare, ShoppingCart, MapPin, Upload, FileCheck, ChevronRight, Heart } from 'lucide-react';
+import { CheckCircle2, MessageSquare, ShoppingCart, MapPin, Upload, FileCheck, ChevronRight, Heart, CarFront, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { buildVehicleDisplayName } from '../domain/vehicle/vehicleProfile';
+import { matchPartToVehicle, rankFitmentResults } from '../domain/fitment/matchPartToVehicle';
+import FitmentBadge from '../components/FitmentBadge';
 
 export default function Product() {
   const { id } = useParams<{ id: string }>();
@@ -11,6 +14,7 @@ export default function Product() {
   const comparison = useStore(state => state.comparison);
   const toggleComparison = useStore(state => state.toggleComparison);
   const addRecentlyViewed = useStore(state => state.addRecentlyViewed);
+  const selectedVehicle = useStore(state => state.selectedVehicle);
   const product = products.find(p => p.id === id);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
@@ -20,12 +24,17 @@ export default function Product() {
     }
   }, [product, addRecentlyViewed]);
 
-  const relatedProducts = product ? products.filter(p => 
-    p.id !== product.id && 
-    (p.category === product.category || p.brand === product.brand)
+  const fitment = product ? matchPartToVehicle(product, selectedVehicle) : null;
+
+  const relatedProducts = product ? rankFitmentResults(
+    products.filter(p => 
+      p.id !== product.id && 
+      (p.category === product.category || p.brand === product.brand)
+    ),
+    selectedVehicle,
   ).slice(0, 5) : [];
 
-  if (!product) {
+  if (!product || !fitment) {
     return <div className="p-20 text-center text-slate-500 font-bold uppercase tracking-widest">Product not found.</div>;
   }
 
@@ -54,10 +63,11 @@ export default function Product() {
           <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-0">
             
             <div className="p-12 md:p-16 lg:col-span-2 xl:col-span-3 flex items-center justify-center bg-slate-50 border-b-2 md:border-b-0 md:border-r-2 border-slate-200 relative aspect-square md:aspect-auto min-h-[400px]">
-               <div className="absolute top-6 left-6">
+               <div className="absolute top-6 left-6 flex flex-col gap-2 items-start">
                  <span className="bg-slate-900 text-amber-400 text-[10px] font-black px-3 py-1.5 rounded-sm shadow-sm uppercase tracking-widest">
                    {product.brand}
                  </span>
+                 <FitmentBadge fitment={fitment} />
                </div>
                <img 
                  referrerPolicy="no-referrer"
@@ -80,13 +90,28 @@ export default function Product() {
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pb-2">Incl. VAT</span>
               </div>
 
+              {selectedVehicle && (
+                <div className="mb-8 bg-slate-50 border-2 border-slate-200 rounded-sm p-5">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 bg-slate-900 text-amber-400 flex items-center justify-center rounded-sm shrink-0">
+                      <CarFront className="w-5 h-5" />
+                    </div>
+                    <div className="flex-grow">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Checked against your vehicle</p>
+                      <p className="text-sm font-black uppercase tracking-tight text-slate-900 mb-3">{buildVehicleDisplayName(selectedVehicle)}</p>
+                      <FitmentBadge fitment={fitment} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col gap-6 mb-10">
                 <div className="flex items-center gap-3">
                   <div className={`w-3 h-3 rounded-none ${
-                    product.stock === 'in_stock' ? 'bg-green-500' : 'bg-orange-500'
+                    product.stock === 'in_stock' ? 'bg-green-500' : product.stock === 'low_stock' ? 'bg-orange-500' : 'bg-red-500'
                   }`}></div>
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-700">
-                    {product.stock === 'in_stock' ? 'In Stock at Kuruman Branch' : 'Limited Stock - Call to confirm'}
+                    {product.stock === 'in_stock' ? 'In Stock at Kuruman Branch' : product.stock === 'low_stock' ? 'Limited Stock - Call to confirm' : 'Out of Stock'}
                   </span>
                 </div>
 
@@ -177,11 +202,54 @@ export default function Product() {
           </div>
         </div>
 
+        <div className="mt-8 bg-white border-2 border-slate-200 p-8 xl:p-12 shadow-sm rounded-sm">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b-2 border-slate-100">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-amber-500" />
+              <h3 className="text-lg font-black text-slate-900 tracking-tight uppercase">Fitment Intelligence</h3>
+            </div>
+            <FitmentBadge fitment={fitment} />
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="bg-slate-50 border-2 border-slate-100 rounded-sm p-5">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Why this result appears</p>
+              <ul className="space-y-2 text-sm font-bold text-slate-700">
+                {fitment.reasons.length > 0 ? fitment.reasons.map((reason, index) => (
+                  <li key={index} className="flex gap-2 leading-snug">
+                    <span className="text-green-600">✓</span>
+                    <span>{reason}</span>
+                  </li>
+                )) : (
+                  <li className="text-slate-500">No fitment reasons available yet.</li>
+                )}
+              </ul>
+            </div>
+
+            <div className="bg-slate-50 border-2 border-slate-100 rounded-sm p-5">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Still needs checking</p>
+              <ul className="space-y-2 text-sm font-bold text-slate-700">
+                {fitment.blockers.length > 0 ? fitment.blockers.map((blocker, index) => (
+                  <li key={index} className="flex gap-2 leading-snug">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <span>{blocker}</span>
+                  </li>
+                )) : (
+                  <li className="flex gap-2 leading-snug text-green-700">
+                    <span>✓</span>
+                    <span>No extra blockers detected by the current rules.</span>
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+
         {product.fits.length > 0 && (
           <div className="mt-8 bg-white border-2 border-slate-200 p-8 xl:p-12 shadow-sm rounded-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b-2 border-slate-100">
                <CheckCircle2 className="w-5 h-5 text-amber-500" />
-               <h3 className="text-lg font-black text-slate-900 tracking-tight uppercase">Confirmed Fitment</h3>
+               <h3 className="text-lg font-black text-slate-900 tracking-tight uppercase">Legacy Fitment Table</h3>
             </div>
             
             <div className="overflow-x-auto">
@@ -228,6 +296,9 @@ export default function Product() {
                          {relatedProduct.brand}
                        </span>
                      </div>
+                     <div className="absolute top-3 left-3">
+                       <FitmentBadge fitment={relatedProduct.fitment} compact />
+                     </div>
                    </div>
                    
                    <div className="p-6 flex flex-col flex-grow">
@@ -244,9 +315,10 @@ export default function Product() {
                        <span className="text-lg font-black text-slate-900 tracking-tighter">R {relatedProduct.price.toFixed(2)}</span>
                        <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-sm ${
                          relatedProduct.stock === 'in_stock' ? 'bg-green-100 text-green-800' : 
-                         'bg-orange-100 text-orange-800'
+                         relatedProduct.stock === 'low_stock' ? 'bg-orange-100 text-orange-800' :
+                         'bg-red-100 text-red-800'
                        }`}>
-                         {relatedProduct.stock === 'in_stock' ? 'In Stock' : 'Low Stock'}
+                         {relatedProduct.stock.replace('_', ' ')}
                        </span>
                      </div>
                    </div>
