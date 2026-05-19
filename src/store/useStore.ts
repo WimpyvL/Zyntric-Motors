@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { mockProducts as initialProducts, Product } from '../data/mockData';
 import type { VehicleProfile } from '../domain/vehicle/vehicleProfile';
+import { buildFitmentRuleFromSupplierRow, mergeFitmentRules } from '../domain/fitment/importFitmentRules';
 
 interface SupplierData {
   sku: string;
@@ -113,26 +114,26 @@ export const useStore = create<StoreState>((set) => ({
       if (!row.sku || !row.name || !row.price) return; // Skip invalid rows
       
       const existingProductIndex = updatedProducts.findIndex(p => p.sku === row.sku);
+      const existingProduct = existingProductIndex >= 0 ? updatedProducts[existingProductIndex] : undefined;
+      const importedFitmentRule = buildFitmentRuleFromSupplierRow(row);
       
-      // Basic normalization
       const newProduct: Product = {
-        id: existingProductIndex >= 0 ? updatedProducts[existingProductIndex].id : `p-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: existingProduct?.id || `p-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         sku: row.sku,
         name: row.name,
-        brand: row.brand || 'Unbranded',
-        category: row.category || 'other',
-        price: Number(row.price) || 0,
+        brand: row.brand || existingProduct?.brand || 'Unbranded',
+        category: row.category || existingProduct?.category || 'other',
+        price: Number(row.price) || existingProduct?.price || 0,
         stock: (Number(row.stockQuantity) || 0) > 5 ? 'in_stock' : (Number(row.stockQuantity) || 0) > 0 ? 'low_stock' : 'out_of_stock',
-        fits: existingProductIndex >= 0 ? updatedProducts[existingProductIndex].fits : [],
-        description: row.description || `Imported part: ${row.name}`,
-        image: existingProductIndex >= 0 ? updatedProducts[existingProductIndex].image : 'https://images.unsplash.com/photo-1600705030225-829d89163f58?auto=format&fit=crop&q=80&w=400&h=300',
+        fits: existingProduct?.fits || [],
+        fitmentRules: mergeFitmentRules(existingProduct?.fitmentRules, importedFitmentRule),
+        description: row.description || existingProduct?.description || `Imported part: ${row.name}`,
+        image: existingProduct?.image || 'https://images.unsplash.com/photo-1600705030225-829d89163f58?auto=format&fit=crop&q=80&w=400&h=300',
       };
 
       if (existingProductIndex >= 0) {
-        // Update existing
         updatedProducts[existingProductIndex] = newProduct;
       } else {
-        // Add new
         updatedProducts.push(newProduct);
       }
     });
