@@ -83,6 +83,7 @@ export const buildFitmentRuleFromSupplierRow = (row: SupplierFitmentRow): Fitmen
     universal,
     requiresManualConfirmation: splitList(row.requiresManualConfirmation) || splitList(row.confirmationRequired),
     notes: splitList(row.fitmentNotes) || splitList(row.notes),
+    reviewStatus: 'needs_review',
   };
 };
 
