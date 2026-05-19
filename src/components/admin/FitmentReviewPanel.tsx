@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Plus, Save, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import type { Product } from '../../data/mockData';
 import type { FitmentRule, FitmentRuleReviewStatus } from '../../domain/fitment/fitmentRule';
@@ -234,7 +234,7 @@ export default function FitmentReviewPanel({
   );
 }
 
-function StatCard({ label, value, tone, icon }: { label: string; value: number; tone: string; icon: React.ReactNode }) {
+function StatCard({ label, value, tone, icon }: { label: string; value: number; tone: string; icon: ReactNode }) {
   return (
     <div className="bg-slate-50 border-2 border-slate-100 p-5 rounded-sm flex items-center justify-between">
       <div>
