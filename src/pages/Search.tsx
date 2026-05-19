@@ -3,6 +3,8 @@ import { useStore } from '../store/useStore';
 import { useState, useEffect } from 'react';
 import { Bot, Package, ChevronRight, CarFront } from 'lucide-react';
 import { buildVehicleDisplayName, type VehicleProfile } from '../domain/vehicle/vehicleProfile';
+import { rankFitmentResults } from '../domain/fitment/matchPartToVehicle';
+import FitmentBadge from '../components/FitmentBadge';
 
 const buildVehicleFromParams = (searchParams: URLSearchParams): VehicleProfile | null => {
   const make = searchParams.get('make') || '';
@@ -43,7 +45,6 @@ export default function Search() {
     }
   }, [vehicleFromParams?.make, vehicleFromParams?.model, vehicleFromParams?.year, vehicleFromParams?.engineName, setSelectedVehicle]);
 
-  // Lightweight intent parse result. This will later move behind the fitment engine.
   const [aiResult, setAiResult] = useState<{
     make?: string;
     model?: string;
@@ -72,6 +73,10 @@ export default function Search() {
       if (q.includes('brake') || q.includes('pad')) extracted.category = 'brakes';
       if (q.includes('filter')) extracted.category = 'filters';
       if (q.includes('oil')) extracted.category = 'oil';
+      if (q.includes('battery')) extracted.category = 'batteries';
+      if (q.includes('wiper')) extracted.category = 'wipers';
+      if (q.includes('belt')) extracted.category = 'belts';
+      if (q.includes('shock')) extracted.category = 'shocks';
       
       setAiResult(extracted);
       setIsSearching(false);
@@ -80,7 +85,7 @@ export default function Search() {
     return () => clearTimeout(timer);
   }, [query, activeVehicle?.make, activeVehicle?.model, activeVehicle?.year]);
 
-  const results = products.filter(p => {
+  const baseResults = products.filter(p => {
     if (isSearching) return false;
     
     let match = false;
@@ -90,20 +95,14 @@ export default function Search() {
     
     if (!match && query && p.name.toLowerCase().includes(query.toLowerCase())) match = true;
     if (!match && query && p.sku.toLowerCase().includes(query.toLowerCase())) match = true;
-
-    if (activeVehicle) {
-      const vehicleFitMatch = p.fits.length === 0 || p.fits.some(fit => {
-        const sameMake = fit.make.toLowerCase() === activeVehicle.make.toLowerCase();
-        const sameModel = fit.model.toLowerCase() === activeVehicle.model.toLowerCase();
-        const sameYear = !activeVehicle.year || fit.year === activeVehicle.year;
-        return sameMake && sameModel && sameYear;
-      });
-
-      return match && vehicleFitMatch;
-    }
+    if (!match && query && p.brand.toLowerCase().includes(query.toLowerCase())) match = true;
     
     return match;
   });
+
+  const results = activeVehicle
+    ? rankFitmentResults(baseResults, activeVehicle).filter(item => item.fitment.confidence !== 'not_compatible')
+    : rankFitmentResults(baseResults, null);
 
   return (
     <div className="bg-slate-100 min-h-screen pb-24">
@@ -142,7 +141,7 @@ export default function Search() {
               </div>
             </div>
             <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-              Confidence: <span className="text-slate-900">{activeVehicle.confidence}</span>
+              Vehicle Confidence: <span className="text-slate-900">{activeVehicle.confidence}</span>
             </div>
           </div>
         )}
@@ -160,7 +159,7 @@ export default function Search() {
               <div className="bg-slate-800 border-2 border-slate-700 p-6 rounded-sm shadow-sm sticky top-24">
                 <div className="flex items-center gap-3 mb-6 pb-4 border-b-2 border-slate-700">
                   <Bot className="w-5 h-5 text-amber-500" />
-                  <h3 className="font-black text-white uppercase tracking-widest text-xs">Intent Snapshot</h3>
+                  <h3 className="font-black text-white uppercase tracking-widest text-xs">Fitment Context</h3>
                 </div>
                 
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">Current matching context:</p>
@@ -181,7 +180,7 @@ export default function Search() {
 
             <div className="flex-grow">
               <div className="mb-6">
-                <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Found {results.length} matches</p>
+                <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Found {results.length} matches ranked by fitment confidence</p>
               </div>
 
               {results.length > 0 ? (
@@ -200,22 +199,23 @@ export default function Search() {
                              {product.brand}
                            </span>
                          </div>
-                         {activeVehicle && (
-                           <div className="absolute top-3 left-3 bg-green-100 text-green-800 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-sm shadow-sm">
-                             Vehicle Filtered
-                           </div>
-                         )}
+                         <div className="absolute top-3 left-3">
+                           <FitmentBadge fitment={product.fitment} compact />
+                         </div>
                       </div>
                       
                       <div className="p-6 flex flex-col flex-grow">
                         <div className="mb-2 uppercase text-[9px] font-black text-slate-400 tracking-widest leading-none">
                           {product.sku}
                         </div>
-                        <h3 className="font-bold text-slate-900 leading-tight mb-6 flex-grow text-sm">
+                        <h3 className="font-bold text-slate-900 leading-tight mb-4 flex-grow text-sm">
                           <Link to={`/product/${product.id}`} className="hover:text-amber-500 before:absolute before:inset-0 transition-colors">
                             {product.name}
                           </Link>
                         </h3>
+                        <p className="text-[10px] font-bold text-slate-500 leading-snug mb-4 line-clamp-2">
+                          {product.fitment.reasons[0] || product.fitment.blockers[0] || 'Fitment needs review.'}
+                        </p>
                         
                         <div className="flex items-center justify-between mt-auto pt-4 border-t-2 border-slate-100">
                           <span className="text-lg font-black text-slate-900 tracking-tighter">R {product.price.toFixed(2)}</span>
