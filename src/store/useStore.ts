@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { mockProducts as initialProducts, Product } from '../data/mockData';
+import type { VehicleProfile } from '../domain/vehicle/vehicleProfile';
 
 interface SupplierData {
   sku: string;
@@ -16,14 +17,18 @@ interface StoreState {
   wishlist: string[];
   comparison: string[];
   recentlyViewed: string[];
+  selectedVehicle: VehicleProfile | null;
   importProducts: (newProducts: SupplierData[]) => void;
   toggleWishlist: (productId: string) => void;
   toggleComparison: (productId: string) => void;
   updateProduct: (productId: string, updates: Partial<Product>) => void;
   addRecentlyViewed: (productId: string) => void;
+  setSelectedVehicle: (vehicle: VehicleProfile | null) => void;
+  clearSelectedVehicle: () => void;
 }
 
 const RECENTLY_VIEWED_KEY = 'recently_viewed_products';
+const SELECTED_VEHICLE_KEY = 'selected_vehicle_profile';
 
 const getInitialRecentlyViewed = (): string[] => {
   try {
@@ -34,11 +39,41 @@ const getInitialRecentlyViewed = (): string[] => {
   }
 };
 
+const getInitialSelectedVehicle = (): VehicleProfile | null => {
+  try {
+    const item = localStorage.getItem(SELECTED_VEHICLE_KEY);
+    return item ? JSON.parse(item) : null;
+  } catch {
+    return null;
+  }
+};
+
+const persistSelectedVehicle = (vehicle: VehicleProfile | null) => {
+  try {
+    if (vehicle) {
+      localStorage.setItem(SELECTED_VEHICLE_KEY, JSON.stringify(vehicle));
+    } else {
+      localStorage.removeItem(SELECTED_VEHICLE_KEY);
+    }
+  } catch (error) {
+    console.warn('Failed to persist selected vehicle', error);
+  }
+};
+
 export const useStore = create<StoreState>((set) => ({
   products: initialProducts,
   wishlist: [],
   comparison: [],
   recentlyViewed: getInitialRecentlyViewed(),
+  selectedVehicle: getInitialSelectedVehicle(),
+  setSelectedVehicle: (vehicle) => set(() => {
+    persistSelectedVehicle(vehicle);
+    return { selectedVehicle: vehicle };
+  }),
+  clearSelectedVehicle: () => set(() => {
+    persistSelectedVehicle(null);
+    return { selectedVehicle: null };
+  }),
   toggleWishlist: (productId) => set((state) => ({
     wishlist: state.wishlist.includes(productId) 
       ? state.wishlist.filter(id => id !== productId)
