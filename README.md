@@ -1,20 +1,81 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Zyntric Motors
 
-# Run and deploy your AI Studio app
+Zyntric Motors is a South African automotive parts storefront prototype focused on one promise: correct parts, fast, with fitment confidence instead of guesswork.
 
-This contains everything you need to run your app locally.
+## Current stack
 
-View your app in AI Studio: https://ai.studio/apps/67a9d798-90a4-4171-ad6a-e59f34cbc1d1
+- Vite
+- React
+- TypeScript
+- Tailwind CSS
+- Zustand
+- Firebase Auth / Firestore wiring
 
-## Run Locally
+## Phase 1 vehicle identity layer
 
-**Prerequisites:**  Node.js
+This repo now includes the first vehicle-domain layer:
 
+```text
+src/domain/vehicle/
+  vehicleProfile.ts
+  vin.ts
+  vehicleProvider.types.ts
+  providers/
+    nhtsaProvider.ts
+```
+
+The frontend can now:
+
+- Validate and normalize VIN input.
+- Decode a VIN through a provider abstraction.
+- Store a normalized `VehicleProfile` globally with Zustand.
+- Persist the selected vehicle in `localStorage`.
+- Navigate from the vehicle selector into search using vehicle context.
+- Filter search results using the active vehicle profile.
+
+## Important fitment note
+
+The current VIN provider uses NHTSA vPIC for prototype decoding. It is useful for early development, but South African production fitment should be backed by a local vehicle identity provider, licence-disc/reg lookup provider, and a proper parts fitment catalogue.
+
+VIN decoding identifies the vehicle. It does not guarantee exact part compatibility by itself.
+
+## Run locally
+
+**Prerequisites:** Node.js
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+
+```bash
+npm install
+```
+
+2. Add local environment values as needed:
+
+```bash
+cp .env.example .env.local
+```
+
 3. Run the app:
-   `npm run dev`
+
+```bash
+npm run dev
+```
+
+4. Check TypeScript:
+
+```bash
+npm run lint
+```
+
+## Next architecture step
+
+Phase 2 should introduce a fitment engine:
+
+```text
+VehicleProfile
+  -> FitmentRule[]
+  -> matchPartToVehicle()
+  -> confirmed / likely / needs_confirmation / not_compatible
+```
+
+That is where the app becomes a true parts recommendation system instead of only a storefront.
