@@ -7,6 +7,7 @@ import Product from './pages/Product';
 import Category from './pages/Category';
 import Cart from './pages/Cart';
 import Admin from './pages/Admin';
+import AdminFitment from './pages/AdminFitment';
 import Search from './pages/Search';
 import Comparison from './pages/Comparison';
 
@@ -27,6 +28,7 @@ function AppContent() {
           <Route path="/categories" element={<Category />} />
           <Route path="/cart" element={<Cart />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/admin/fitment" element={<AdminFitment />} />
           <Route path="/search" element={<Search />} />
           <Route path="/comparison" element={<Comparison />} />
         </Routes>
