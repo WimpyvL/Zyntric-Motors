@@ -1,14 +1,24 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { vehicles } from '../data/mockData';
 import { Search, ChevronDown, Check, CarFront, X } from 'lucide-react';
+import { useStore } from '../store/useStore';
+import { buildVehicleDisplayName, type VehicleProfile } from '../domain/vehicle/vehicleProfile';
+import { getVinProgressLabel, normalizeVin, validateVin } from '../domain/vehicle/vin';
+import { nhtsaProvider } from '../domain/vehicle/providers/nhtsaProvider';
 
 type Step = 'make' | 'model' | 'year' | 'engine' | null;
 
 export default function VehicleSelector() {
-  const [selectedMake, setSelectedMake] = useState<string>('');
-  const [selectedModel, setSelectedModel] = useState<string>('');
-  const [selectedYear, setSelectedYear] = useState<string>('');
-  const [selectedEngine, setSelectedEngine] = useState<string>('');
+  const navigate = useNavigate();
+  const selectedVehicle = useStore(state => state.selectedVehicle);
+  const setSelectedVehicle = useStore(state => state.setSelectedVehicle);
+  const clearSelectedVehicle = useStore(state => state.clearSelectedVehicle);
+
+  const [selectedMake, setSelectedMake] = useState<string>(selectedVehicle?.make || '');
+  const [selectedModel, setSelectedModel] = useState<string>(selectedVehicle?.model || '');
+  const [selectedYear, setSelectedYear] = useState<string>(selectedVehicle?.year?.toString() || '');
+  const [selectedEngine, setSelectedEngine] = useState<string>(selectedVehicle?.engineName || '');
   
   const [activeStep, setActiveStep] = useState<Step>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
@@ -19,8 +29,8 @@ export default function VehicleSelector() {
         setActiveStep(null);
       }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const makes = vehicles.map(v => v.make);
@@ -47,11 +57,33 @@ export default function VehicleSelector() {
     return model ? model.engines || [] : [];
   }, [selectedMake, selectedModel]);
 
+  const buildManualVehicle = (overrides: Partial<VehicleProfile> = {}): VehicleProfile | null => {
+    const make = overrides.make || selectedMake;
+    const model = overrides.model || selectedModel;
+    const yearValue = overrides.year ?? Number(selectedYear);
+    const engineName = overrides.engineName || selectedEngine;
+
+    if (!make || !model || !yearValue || !engineName) return null;
+
+    return {
+      make,
+      model,
+      year: yearValue,
+      engineName,
+      source: 'manual',
+      provider: 'manual-selector',
+      confidence: 'medium',
+      warnings: ['Manual vehicle selection should still be confirmed against VIN/licence disc before final fulfilment.'],
+      ...overrides,
+    };
+  };
+
   const handleMakeChange = (make: string) => {
     setSelectedMake(make);
     setSelectedModel('');
     setSelectedYear('');
     setSelectedEngine('');
+    clearSelectedVehicle();
     setActiveStep('model');
   };
 
@@ -59,95 +91,111 @@ export default function VehicleSelector() {
     setSelectedModel(model);
     setSelectedYear('');
     setSelectedEngine('');
+    clearSelectedVehicle();
     setActiveStep('year');
   };
 
   const handleYearChange = (year: string) => {
     setSelectedYear(year);
     setSelectedEngine('');
+    clearSelectedVehicle();
     setActiveStep('engine');
   };
 
   const handleEngineChange = (engine: string) => {
     setSelectedEngine(engine);
     setActiveStep(null);
+
+    const manualVehicle = buildManualVehicle({ engineName: engine });
+    if (manualVehicle) {
+      setSelectedVehicle(manualVehicle);
+    }
   };
 
   const [vin, setVin] = useState('');
   const [vinError, setVinError] = useState('');
   const [isDecoding, setIsDecoding] = useState(false);
 
-  const validateVin = (value: string) => {
-    if (!value) {
+  const validateVinInput = (value: string) => {
+    const normalized = normalizeVin(value);
+
+    if (!normalized) {
       setVinError('');
       return;
     }
-    
-    // VINs do not include I, O, or Q
-    const invalidChars = /[IOQ]/i;
-    if (invalidChars.test(value)) {
-      setVinError('INVALID CHARACTERS (I, O, Q NOT ALLOWED)');
+
+    const validation = validateVin(normalized);
+    if (!validation.isValid && normalized.length === 17) {
+      setVinError(validation.error?.toUpperCase() || 'INVALID VIN');
       return;
     }
 
-    if (value.length < 17) {
-      setVinError(`LENGTH: ${value.length}/17`);
+    if (!validation.isValid) {
+      setVinError(getVinProgressLabel(normalized));
     } else {
       setVinError('');
     }
   };
 
   const handleVinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.toUpperCase();
+    const value = normalizeVin(e.target.value);
     setVin(value);
-    validateVin(value);
+    validateVinInput(value);
   };
 
   const handleVinDecode = async () => {
-    if (vin.length !== 17) {
-      setVinError("MUST BE EXACTLY 17 CHARACTERS.");
+    const validation = validateVin(vin);
+    if (!validation.isValid) {
+      setVinError(validation.error?.toUpperCase() || 'INVALID VIN');
       return;
     }
 
     setIsDecoding(true);
-    setVinError("");
+    setVinError('');
 
     try {
-      const response = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${vin}?format=json`);
-      const data = await response.json();
+      const result = await nhtsaProvider.decodeVin({ vin: validation.normalizedVin });
 
-      if (data.Results && data.Results.length > 0) {
-        const vehicle = data.Results[0];
-        
-        // Check if decoding was successful (NHTSA returns results even for some invalid VINs but with error codes)
-        if (vehicle.ErrorCode !== "0") {
-          setVinError(`DECODE ERROR: ${vehicle.ErrorText || 'INVALID VIN'}`);
-          setIsDecoding(false);
-          return;
-        }
-
-        const make = vehicle.Make || "";
-        const model = vehicle.Model || "";
-        const year = vehicle.ModelYear || "";
-
-        setSelectedMake(make);
-        setSelectedModel(model);
-        setSelectedYear(year);
-        setSelectedEngine(""); // Engines are harder to map exactly from VIN without more complex logic
-        
-        setVin("");
-        setVinError("");
+      if (!result.vehicle) {
+        setVinError(result.warnings[0]?.toUpperCase() || 'NO VEHICLE DATA FOUND.');
         setIsDecoding(false);
-      } else {
-        setVinError("NO VEHICLE DATA FOUND.");
-        setIsDecoding(false);
+        return;
       }
+
+      const vehicle = result.vehicle;
+      setSelectedMake(vehicle.make || '');
+      setSelectedModel(vehicle.model || '');
+      setSelectedYear(vehicle.year?.toString() || '');
+      setSelectedEngine(vehicle.engineName || '');
+      setSelectedVehicle(vehicle);
+      setVin('');
+      setVinError('');
+      setIsDecoding(false);
     } catch (error) {
-      console.error("VIN Decode Error:", error);
-      setVinError("NETWORK ERROR. PLEASE TRY AGAIN.");
+      console.error('VIN Decode Error:', error);
+      setVinError('NETWORK ERROR. PLEASE TRY AGAIN.');
       setIsDecoding(false);
     }
   };
+
+  const handleFindParts = () => {
+    const vehicle = selectedVehicle || buildManualVehicle();
+
+    if (!vehicle) return;
+
+    setSelectedVehicle(vehicle);
+
+    const params = new URLSearchParams({
+      make: vehicle.make,
+      model: vehicle.model,
+      year: vehicle.year?.toString() || '',
+      engine: vehicle.engineName || '',
+    });
+
+    navigate(`/search?${params.toString()}`);
+  };
+
+  const canFindParts = Boolean(selectedVehicle || buildManualVehicle());
 
   return (
     <div className="bg-slate-900 p-1 rounded-sm shadow-2xl relative z-20 w-full mb-8 lg:mb-0">
@@ -171,7 +219,7 @@ export default function VehicleSelector() {
                   }`}
                 />
                 {vinError && (
-                  <div className="absolute left-0 -bottom-5 text-[8px] font-black text-red-500 tracking-tighter uppercase whitespace-nowrap">
+                  <div className={`absolute left-0 -bottom-5 text-[8px] font-black tracking-tighter uppercase whitespace-nowrap ${vinError.startsWith('LENGTH') ? 'text-slate-400' : 'text-red-500'}`}>
                     {vinError}
                   </div>
                 )}
@@ -195,6 +243,29 @@ export default function VehicleSelector() {
           Or use <span className="text-white">manual selection</span> below
         </p>
       </div>
+
+      {selectedVehicle && (
+        <div className="bg-slate-950 border-b border-slate-800 px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <p className="text-[8px] text-slate-500 font-black uppercase tracking-widest mb-1">Selected Vehicle</p>
+            <p className="text-[10px] text-amber-400 font-black uppercase tracking-widest">
+              {buildVehicleDisplayName(selectedVehicle)}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              clearSelectedVehicle();
+              setSelectedMake('');
+              setSelectedModel('');
+              setSelectedYear('');
+              setSelectedEngine('');
+            }}
+            className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors self-start md:self-auto"
+          >
+            Clear Vehicle
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-1 relative" ref={selectorRef}>
         <div 
@@ -242,7 +313,8 @@ export default function VehicleSelector() {
         </div>
 
         <button 
-          disabled={!selectedEngine}
+          onClick={handleFindParts}
+          disabled={!canFindParts}
           className="bg-amber-400 hover:bg-amber-500 text-slate-900 transition-colors flex items-center justify-center p-4 lg:p-5 disabled:bg-slate-300 disabled:text-slate-500 rounded-sm md:rounded-none"
         >
            <span className="font-black uppercase text-[10px] tracking-widest flex items-center gap-2">
@@ -317,7 +389,7 @@ export default function VehicleSelector() {
       
       <div className="bg-slate-800 p-3 pt-4 text-center">
         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-          Or simply <span className="text-white underline cursor-pointer hover:text-amber-400 transition-colors">upload a photo of your license disc or VIN</span> for 100% fitment guarantee
+          Or simply <span className="text-white underline cursor-pointer hover:text-amber-400 transition-colors">upload a photo of your license disc or VIN</span> for manual fitment confirmation
         </p>
       </div>
     </div>
