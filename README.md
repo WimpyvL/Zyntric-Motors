@@ -13,7 +13,7 @@ Zyntric Motors is a South African automotive parts storefront prototype focused 
 
 ## Phase 1 vehicle identity layer
 
-This repo now includes the first vehicle-domain layer:
+This repo includes the first vehicle-domain layer:
 
 ```text
 src/domain/vehicle/
@@ -24,7 +24,7 @@ src/domain/vehicle/
     nhtsaProvider.ts
 ```
 
-The frontend can now:
+The frontend can:
 
 - Validate and normalize VIN input.
 - Decode a VIN through a provider abstraction.
@@ -32,6 +32,33 @@ The frontend can now:
 - Persist the selected vehicle in `localStorage`.
 - Navigate from the vehicle selector into search using vehicle context.
 - Filter search results using the active vehicle profile.
+
+## Phase 2 fitment engine
+
+The repo now includes the first deterministic fitment layer:
+
+```text
+src/domain/fitment/
+  fitmentRule.ts
+  matchPartToVehicle.ts
+```
+
+Products can now carry detailed `fitmentRules` alongside the older `fits` array. The matcher evaluates a selected `VehicleProfile` against product rules and returns:
+
+```text
+confirmed
+likely
+needs_confirmation
+not_compatible
+```
+
+The storefront now uses this engine to:
+
+- Rank search results by fitment confidence.
+- Hide incompatible parts when a vehicle is active.
+- Show fitment confidence badges on search result cards.
+- Show fitment status, reasons, and blockers on product pages.
+- Preserve legacy `fits` data as a fallback while richer fitment rules are added.
 
 ## Important fitment note
 
@@ -69,13 +96,14 @@ npm run lint
 
 ## Next architecture step
 
-Phase 2 should introduce a fitment engine:
+Phase 3 should turn the mock fitment system into an operational backend:
 
 ```text
-VehicleProfile
-  -> FitmentRule[]
-  -> matchPartToVehicle()
-  -> confirmed / likely / needs_confirmation / not_compatible
+Supplier CSV/import
+  -> normalized products
+  -> fitmentRules
+  -> Firestore/API persistence
+  -> admin correction workflow
 ```
 
-That is where the app becomes a true parts recommendation system instead of only a storefront.
+That is where Zyntric starts building its private South African fitment knowledge base.
