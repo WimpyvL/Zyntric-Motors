@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { mockProducts as initialProducts, Product } from '../data/mockData';
 import type { VehicleProfile } from '../domain/vehicle/vehicleProfile';
+import type { FitmentRule, FitmentRuleReviewStatus } from '../domain/fitment/fitmentRule';
 import { buildFitmentRuleFromSupplierRow, mergeFitmentRules } from '../domain/fitment/importFitmentRules';
 
 interface SupplierData {
@@ -23,6 +24,9 @@ interface StoreState {
   toggleWishlist: (productId: string) => void;
   toggleComparison: (productId: string) => void;
   updateProduct: (productId: string, updates: Partial<Product>) => void;
+  upsertFitmentRule: (productId: string, rule: FitmentRule) => void;
+  removeFitmentRule: (productId: string, ruleId: string) => void;
+  setFitmentRuleReviewStatus: (productId: string, ruleId: string, status: FitmentRuleReviewStatus, reviewedBy?: string) => void;
   addRecentlyViewed: (productId: string) => void;
   setSelectedVehicle: (vehicle: VehicleProfile | null) => void;
   clearSelectedVehicle: () => void;
@@ -61,6 +65,12 @@ const persistSelectedVehicle = (vehicle: VehicleProfile | null) => {
   }
 };
 
+const upsertRule = (rules: FitmentRule[] = [], rule: FitmentRule): FitmentRule[] => {
+  const existingIndex = rules.findIndex(existingRule => existingRule.id === rule.id);
+  if (existingIndex < 0) return [...rules, rule];
+  return rules.map((existingRule, index) => index === existingIndex ? rule : existingRule);
+};
+
 export const useStore = create<StoreState>((set) => ({
   products: initialProducts,
   wishlist: [],
@@ -89,6 +99,35 @@ export const useStore = create<StoreState>((set) => ({
   })),
   updateProduct: (productId, updates) => set((state) => ({
     products: state.products.map(p => p.id === productId ? { ...p, ...updates } : p)
+  })),
+  upsertFitmentRule: (productId, rule) => set((state) => ({
+    products: state.products.map(product => product.id === productId
+      ? { ...product, fitmentRules: upsertRule(product.fitmentRules, rule) }
+      : product
+    )
+  })),
+  removeFitmentRule: (productId, ruleId) => set((state) => ({
+    products: state.products.map(product => product.id === productId
+      ? { ...product, fitmentRules: (product.fitmentRules || []).filter(rule => rule.id !== ruleId) }
+      : product
+    )
+  })),
+  setFitmentRuleReviewStatus: (productId, ruleId, status, reviewedBy) => set((state) => ({
+    products: state.products.map(product => product.id === productId
+      ? {
+          ...product,
+          fitmentRules: (product.fitmentRules || []).map(rule => rule.id === ruleId
+            ? {
+                ...rule,
+                reviewStatus: status,
+                reviewedAt: new Date().toISOString(),
+                reviewedBy,
+              }
+            : rule
+          ),
+        }
+      : product
+    )
   })),
   addRecentlyViewed: (productId) => set((state) => {
     const existingIndex = state.recentlyViewed.indexOf(productId);

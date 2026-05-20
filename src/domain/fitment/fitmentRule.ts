@@ -1,4 +1,5 @@
 export type FitmentConfidence = 'confirmed' | 'likely' | 'needs_confirmation' | 'not_compatible';
+export type FitmentRuleReviewStatus = 'needs_review' | 'reviewed' | 'rejected';
 
 export interface FitmentRule {
   id: string;
@@ -19,6 +20,9 @@ export interface FitmentRule {
   requiresManualConfirmation?: string[];
   exclusions?: string[];
   notes?: string[];
+  reviewStatus?: FitmentRuleReviewStatus;
+  reviewedAt?: string;
+  reviewedBy?: string;
 }
 
 export interface FitmentMatchResult {
@@ -41,4 +45,10 @@ export const FITMENT_CONFIDENCE_SCORES: Record<FitmentConfidence, number> = {
   likely: 70,
   needs_confirmation: 40,
   not_compatible: 0,
+};
+
+export const FITMENT_REVIEW_LABELS: Record<FitmentRuleReviewStatus, string> = {
+  needs_review: 'Needs Review',
+  reviewed: 'Reviewed',
+  rejected: 'Rejected',
 };
