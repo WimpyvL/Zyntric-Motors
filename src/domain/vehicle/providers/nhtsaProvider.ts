@@ -16,11 +16,12 @@ interface NhtsaDecodeResponse {
   }>;
 }
 
-const NON_BLOCKING_NHTSA_ERROR_CODES = new Set(['1', '5', '14']);
+const NON_BLOCKING_NHTSA_ERROR_CODES = new Set(['1', '5', '7', '14']);
 
 const NHTSA_ERROR_CODE_HINTS: Record<string, string> = {
   '1': 'NHTSA check digit validation did not pass.',
   '5': 'NHTSA detected one or more VIN character issues.',
+  '7': 'NHTSA does not have this manufacturer registered for U.S. road use/import, but partial VIN data may still decode.',
   '14': 'NHTSA could not decode some VIN positions for this manufacturer submission.',
 };
 
@@ -60,10 +61,9 @@ const sanitizeDecodedValue = (value?: string): string | undefined => {
 
 const parseNhtsaErrorCodes = (value?: string): string[] => {
   if (!value) return [];
-  return value
-    .split(/[,\s]+/)
-    .map((code) => code.trim())
-    .filter(Boolean);
+  const matchedCodes = value.match(/\b\d+\b/g);
+  if (!matchedCodes) return [];
+  return [...new Set(matchedCodes)];
 };
 
 const resolveManufacturerFromWmi = (vin: string): string | undefined => {
