@@ -136,26 +136,27 @@ export const nhtsaProvider: VehicleIdentityProvider = {
     const make = sanitizeDecodedValue(decoded.Make) || resolveManufacturerFromWmi(validation.normalizedVin);
     const model = sanitizeDecodedValue(decoded.Model);
 
-    if (!make || !model) {
-      return {
-        vehicle: null,
-        provider: this.id,
-        raw: data,
-        warnings: ['VIN decoded, but make/model data was incomplete.'],
-      };
-    }
-
-    if (!sanitizeDecodedValue(decoded.Make)) {
+    if (!sanitizeDecodedValue(decoded.Make) && make) {
       providerWarnings.push('Manufacturer was inferred from WMI because the VIN provider did not return a make.');
     }
 
     const year = toNumber(decoded.ModelYear);
 
+    const missingFields: string[] = [];
+    if (!make) missingFields.push('make');
+    if (!model) missingFields.push('model');
+
+    if (missingFields.length > 0) {
+      providerWarnings.push(
+        `VIN decoded, but ${missingFields.join(' and ')} data was incomplete. Please verify or complete the missing fields manually.`,
+      );
+    }
+
     return {
       vehicle: {
         vin: validation.normalizedVin,
-        make,
-        model,
+        make: make || 'Unknown',
+        model: model || 'Unknown',
         year,
         variant: sanitizeDecodedValue(decoded.Trim),
         engineName: sanitizeDecodedValue(decoded.EngineModel),
@@ -164,7 +165,7 @@ export const nhtsaProvider: VehicleIdentityProvider = {
         bodyType: sanitizeDecodedValue(decoded.BodyClass),
         source: 'vin',
         provider: this.id,
-        confidence: year ? 'medium' : 'low',
+        confidence: missingFields.length > 0 ? 'low' : year ? 'medium' : 'low',
         warnings: [
           ...providerWarnings,
           'NHTSA vPIC is useful for prototype VIN decoding, but South African fitment should be confirmed with local data or manual review.',
