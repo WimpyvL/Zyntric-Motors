@@ -7,9 +7,12 @@ import { FITMENT_REVIEW_LABELS } from '../../domain/fitment/fitmentRule';
 interface FitmentReviewPanelProps {
   products: Product[];
   operatorEmail?: string | null;
-  upsertFitmentRule: (productId: string, rule: FitmentRule) => void;
-  removeFitmentRule: (productId: string, ruleId: string) => void;
-  setFitmentRuleReviewStatus: (productId: string, ruleId: string, status: FitmentRuleReviewStatus, reviewedBy?: string) => void;
+  upsertFitmentRule: (productId: string, rule: FitmentRule, updatedBy?: string) => Promise<void>;
+  removeFitmentRule: (productId: string, ruleId: string, updatedBy?: string) => Promise<void>;
+  setFitmentRuleReviewStatus: (productId: string, ruleId: string, status: FitmentRuleReviewStatus, reviewedBy?: string) => Promise<void>;
+  syncStatus: 'idle' | 'saving' | 'saved' | 'error';
+  syncMessage: string | null;
+  syncError: string | null;
 }
 
 const joinList = (values?: string[]) => values?.join('|') || '';
@@ -38,6 +41,9 @@ export default function FitmentReviewPanel({
   upsertFitmentRule,
   removeFitmentRule,
   setFitmentRuleReviewStatus,
+  syncStatus,
+  syncMessage,
+  syncError,
 }: FitmentReviewPanelProps) {
   const productsWithRules = products.filter(product => (product.fitmentRules || []).length > 0);
   const productsWithoutRules = products.filter(product => (product.fitmentRules || []).length === 0);
@@ -78,12 +84,12 @@ export default function FitmentReviewPanel({
     setDraftRule(prev => prev ? { ...prev, ...updates } : prev);
   };
 
-  const saveDraft = () => {
+  const saveDraft = async () => {
     if (!selectedProduct || !draftRule) return;
-    upsertFitmentRule(selectedProduct.id, {
+    await upsertFitmentRule(selectedProduct.id, {
       ...draftRule,
       reviewStatus: draftRule.reviewStatus || 'needs_review',
-    });
+    }, operatorEmail || undefined);
     cancelEditing();
   };
 
@@ -100,11 +106,24 @@ export default function FitmentReviewPanel({
         </div>
         <button
           onClick={startNewRule}
+          disabled={syncStatus === 'saving'}
           className="bg-slate-900 text-amber-400 hover:bg-slate-800 transition-colors font-black text-[10px] uppercase tracking-widest px-5 py-3 rounded-sm flex items-center justify-center gap-2 shadow-sm"
         >
           <Plus className="w-4 h-4" /> Add Rule
         </button>
       </div>
+
+      {(syncMessage || syncError) && (
+        <div className={`mb-6 rounded-sm border-2 px-4 py-3 text-[10px] font-black uppercase tracking-widest ${
+          syncStatus === 'error'
+            ? 'border-red-200 bg-red-50 text-red-700'
+            : syncStatus === 'saving'
+              ? 'border-amber-200 bg-amber-50 text-amber-700'
+              : 'border-green-200 bg-green-50 text-green-700'
+        }`}>
+          {syncError || syncMessage}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <StatCard label="Products With Rules" value={productsWithRules.length} tone="text-green-600" icon={<ShieldCheck className="w-8 h-8 text-green-400" />} />
@@ -183,10 +202,10 @@ export default function FitmentReviewPanel({
                     ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => startEditing(rule)} className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm">Edit</button>
-                    <button onClick={() => setFitmentRuleReviewStatus(selectedProduct.id, rule.id, 'reviewed', operatorEmail || undefined)} className="bg-green-100 hover:bg-green-200 text-green-800 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm">Approve</button>
-                    <button onClick={() => setFitmentRuleReviewStatus(selectedProduct.id, rule.id, 'rejected', operatorEmail || undefined)} className="bg-red-100 hover:bg-red-200 text-red-800 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm">Reject</button>
-                    <button onClick={() => removeFitmentRule(selectedProduct.id, rule.id)} className="bg-white hover:bg-red-50 text-red-500 border-2 border-red-100 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
+                    <button disabled={syncStatus === 'saving'} onClick={() => startEditing(rule)} className="bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm">Edit</button>
+                    <button disabled={syncStatus === 'saving'} onClick={() => void setFitmentRuleReviewStatus(selectedProduct.id, rule.id, 'reviewed', operatorEmail || undefined)} className="bg-green-100 hover:bg-green-200 disabled:opacity-50 text-green-800 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm">Approve</button>
+                    <button disabled={syncStatus === 'saving'} onClick={() => void setFitmentRuleReviewStatus(selectedProduct.id, rule.id, 'rejected', operatorEmail || undefined)} className="bg-red-100 hover:bg-red-200 disabled:opacity-50 text-red-800 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm">Reject</button>
+                    <button disabled={syncStatus === 'saving'} onClick={() => void removeFitmentRule(selectedProduct.id, rule.id, operatorEmail || undefined)} className="bg-white hover:bg-red-50 disabled:opacity-50 text-red-500 border-2 border-red-100 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
                   </div>
                 </div>
               </div>
@@ -223,8 +242,8 @@ export default function FitmentReviewPanel({
               </div>
 
               <div className="flex flex-wrap justify-end gap-3 mt-6 pt-4 border-t-2 border-slate-100">
-                <button onClick={cancelEditing} className="bg-slate-100 text-slate-600 font-black text-[10px] uppercase tracking-widest px-5 py-3 rounded-sm">Cancel</button>
-                <button onClick={saveDraft} className="bg-slate-900 text-amber-400 font-black text-[10px] uppercase tracking-widest px-5 py-3 rounded-sm flex items-center gap-2"><Save className="w-4 h-4" /> Save Rule</button>
+                <button onClick={cancelEditing} disabled={syncStatus === 'saving'} className="bg-slate-100 text-slate-600 disabled:opacity-50 font-black text-[10px] uppercase tracking-widest px-5 py-3 rounded-sm">Cancel</button>
+                <button onClick={() => void saveDraft()} disabled={syncStatus === 'saving'} className="bg-slate-900 text-amber-400 disabled:opacity-50 font-black text-[10px] uppercase tracking-widest px-5 py-3 rounded-sm flex items-center gap-2"><Save className="w-4 h-4" /> {syncStatus === 'saving' ? 'Saving...' : 'Save Rule'}</button>
               </div>
             </div>
           )}

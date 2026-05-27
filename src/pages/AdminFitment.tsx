@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, ShieldAlert } from 'lucide-react';
 import FitmentReviewPanel from '../components/admin/FitmentReviewPanel';
@@ -5,14 +6,30 @@ import { useAuth } from '../context/AuthContext';
 import { useStore } from '../store/useStore';
 
 export default function AdminFitment() {
-  const { user, isAdmin, loading, login, logout } = useAuth();
+  const { user, isAdmin, loading, authMode, login, logout } = useAuth();
+  const [adminPassword, setAdminPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
   const products = useStore(state => state.products);
   const upsertFitmentRule = useStore(state => state.upsertFitmentRule);
   const removeFitmentRule = useStore(state => state.removeFitmentRule);
   const setFitmentRuleReviewStatus = useStore(state => state.setFitmentRuleReviewStatus);
+  const catalogueLoadStatus = useStore(state => state.catalogueLoadStatus);
+  const catalogueSyncStatus = useStore(state => state.catalogueSyncStatus);
+  const catalogueMessage = useStore(state => state.catalogueMessage);
+  const catalogueError = useStore(state => state.catalogueError);
 
-  const isOwner = user?.email === 'loop69org@gmail.com';
-  const effectiveIsAdmin = isAdmin || isOwner;
+  const handleAdminLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const success = await login(adminPassword);
+
+    if (!success) {
+      setLoginError('Incorrect admin password.');
+      return;
+    }
+
+    setLoginError('');
+    setAdminPassword('');
+  };
 
   if (loading) {
     return (
@@ -27,19 +44,48 @@ export default function AdminFitment() {
       <div className="bg-slate-100 min-h-screen flex items-center justify-center p-4 selection:bg-amber-400">
         <div className="bg-white p-8 rounded-sm shadow-sm border-2 border-slate-200 max-w-sm w-full">
           <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase leading-none mb-2">Fitment Ops</h1>
-          <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-8">Authorized admin access required</p>
-          <button 
-            onClick={login}
-            className="w-full bg-slate-900 text-white font-black uppercase tracking-widest text-[10px] py-4 rounded-sm hover:bg-slate-800 transition-all flex items-center justify-center gap-3 shadow-xl transform active:scale-95"
-          >
-            Sign In with Google
-          </button>
+          <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-8">Local admin gate only. Encore writes still require backend auth.</p>
+          <form onSubmit={handleAdminLogin} className="space-y-4">
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              value="admin"
+              readOnly
+              tabIndex={-1}
+              aria-hidden="true"
+              className="sr-only"
+            />
+            <input
+              type="password"
+              value={adminPassword}
+              onChange={(event) => {
+                setAdminPassword(event.target.value);
+                if (loginError) {
+                  setLoginError('');
+                }
+              }}
+              className="w-full bg-slate-50 border-2 border-slate-200 px-4 py-3 text-sm font-bold text-slate-900 rounded-sm focus:outline-none focus:border-slate-900"
+              placeholder="Admin password"
+              name="password"
+              autoComplete="current-password"
+            />
+            <button
+              type="submit"
+              className="w-full bg-slate-900 text-white font-black uppercase tracking-widest text-[10px] py-4 rounded-sm hover:bg-slate-800 transition-all shadow-xl transform active:scale-95"
+            >
+              Unlock Fitment Ops
+            </button>
+            {loginError ? (
+              <p className="text-[10px] text-center text-red-600 font-black uppercase tracking-widest">{loginError}</p>
+            ) : null}
+          </form>
         </div>
       </div>
     );
   }
 
-  if (!effectiveIsAdmin) {
+  if (!isAdmin) {
     return (
       <div className="bg-slate-100 min-h-screen flex items-center justify-center p-4">
         <div className="bg-white p-10 rounded-sm shadow-2xl border-4 border-slate-900 max-w-md w-full text-center">
@@ -47,7 +93,7 @@ export default function AdminFitment() {
             <ShieldAlert className="w-10 h-10" />
           </div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-2">Access Revoked</h2>
-          <p className="text-slate-500 font-bold text-sm mb-8">Your account <span className="text-slate-900 italic">({user.email})</span> does not have administrative clearance for fitment operations.</p>
+          <p className="text-slate-500 font-bold text-sm mb-8">This admin session is not authorized for fitment operations.</p>
           <div className="flex flex-col gap-3">
              <button 
                 onClick={logout}
@@ -73,6 +119,7 @@ export default function AdminFitment() {
           </Link>
           <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">Fitment Review Ops</h1>
           <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Supplier rules, manual corrections, and fulfilment confidence control</p>
+          <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mt-2">Auth mode: {authMode.replace(/_/g, ' ')}</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="bg-slate-800 text-amber-400 text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-sm truncate max-w-[220px]">
@@ -91,6 +138,13 @@ export default function AdminFitment() {
           upsertFitmentRule={upsertFitmentRule}
           removeFitmentRule={removeFitmentRule}
           setFitmentRuleReviewStatus={setFitmentRuleReviewStatus}
+          syncStatus={catalogueSyncStatus}
+          syncMessage={
+            catalogueLoadStatus === 'loading'
+              ? 'Syncing catalogue...'
+              : catalogueMessage
+          }
+          syncError={catalogueError}
         />
       </main>
     </div>

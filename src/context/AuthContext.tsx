@@ -1,85 +1,58 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
-import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+
+const ADMIN_SESSION_KEY = 'zyntric-admin-session';
+const DEFAULT_ADMIN_PASSWORD = 'zyntric-admin';
+
+interface AdminUser {
+  email: string;
+}
 
 interface AuthContextType {
-  user: User | null;
+  user: AdminUser | null;
   isAdmin: boolean;
   loading: boolean;
-  login: () => Promise<void>;
+  authMode: 'local_password_gate';
+  login: (password: string) => Promise<boolean>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function getConfiguredAdminPassword() {
+  return import.meta.env.VITE_ADMIN_PASSWORD?.trim() || DEFAULT_ADMIN_PASSWORD;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
-        const isOwner = user.email === 'loop69org@gmail.com';
-        
-        try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            if (isOwner && userData.role !== 'admin') {
-              // Self-healing: Upgrade owner to admin if they exist but role is wrong
-              try {
-                await setDoc(doc(db, 'users', user.uid), { ...userData, role: 'admin' }, { merge: true });
-                setIsAdmin(true);
-              } catch (err) {
-                handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
-              }
-            } else {
-              setIsAdmin(userData.role === 'admin');
-            }
-          } else {
-            // New user
-            const newUser = {
-              email: user.email,
-              role: isOwner ? 'admin' : 'customer',
-              joined: new Date().toISOString(),
-              status: 'active',
-              name: user.displayName || 'Guest'
-            };
-            try {
-              await setDoc(doc(db, 'users', user.uid), newUser);
-              setIsAdmin(isOwner);
-            } catch (err) {
-              handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
-            }
-          }
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
-        }
-      } else {
-        setIsAdmin(false);
-      }
-      setLoading(false);
-    });
+    const hasActiveSession = window.sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true';
 
-    return () => unsubscribe();
+    if (hasActiveSession) {
+      setUser({ email: 'admin@local' });
+    }
+
+    setLoading(false);
   }, []);
 
-  const login = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+  const login = async (password: string) => {
+    if (password !== getConfiguredAdminPassword()) {
+      return false;
+    }
+
+    window.sessionStorage.setItem(ADMIN_SESSION_KEY, 'true');
+    setUser({ email: 'admin@local' });
+    return true;
   };
 
   const logout = async () => {
-    await signOut(auth);
+    window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAdmin, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, isAdmin: !!user, loading, authMode: 'local_password_gate', login, logout }}>
       {children}
     </AuthContext.Provider>
   );

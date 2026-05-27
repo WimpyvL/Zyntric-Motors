@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -12,6 +13,19 @@ import Search from './pages/Search';
 import Comparison from './pages/Comparison';
 
 import { AuthProvider } from './context/AuthContext';
+import { useStore } from './store/useStore';
+
+function CatalogueBootstrap() {
+  const loadCatalogue = useStore(state => state.loadCatalogue);
+
+  useEffect(() => {
+    loadCatalogue().catch((error) => {
+      console.error('Catalogue bootstrap failed', error);
+    });
+  }, [loadCatalogue]);
+
+  return null;
+}
 
 function AppContent() {
   const location = useLocation();
@@ -42,6 +56,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <CatalogueBootstrap />
         <ScrollToTop />
         <AppContent />
       </AuthProvider>

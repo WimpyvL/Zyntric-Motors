@@ -6,3 +6,17 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Secret and config dump guardrails
+firebase-applet-config.json
+*firebase*config*.json
+*google*config*.json
+*service*account*.json
+*credentials*.json
+*.pem
+*.p12
+*.p8
+*.key
+*.crt
+secrets/
+config-dumps/

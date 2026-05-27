@@ -47,6 +47,8 @@ export interface Product {
   fitmentRules?: FitmentRule[];
   description: string;
   image: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export const categories = [

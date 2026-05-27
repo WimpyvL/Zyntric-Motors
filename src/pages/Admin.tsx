@@ -1,28 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Papa from 'papaparse';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../context/AuthContext';
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, BarChart3, TrendingUp, Package, Users, Home, Settings, ShoppingCart, Sidebar as SidebarIcon, Menu, X, Truck, Star, Phone, Mail, Plus, Search, Building2, MapPin, ShieldCheck, UserCog, Save, RefreshCw, LogIn, ShieldAlert } from 'lucide-react';
+import { ApiCapabilityError, getApiRuntimeStatus, type ApiRuntimeStatus } from '../lib/api';
+import { probeCatalogueRead } from '../lib/catalogueRepository';
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, BarChart3, TrendingUp, Package, Users, Home, Settings, ShoppingCart, Sidebar as SidebarIcon, Menu, X, Truck, Star, Phone, Mail, Plus, Search, Building2, MapPin, ShieldCheck, UserCog, Save, RefreshCw, ShieldAlert } from 'lucide-react';
+// (|/) Klaasvaakie is the author.
+
+type DiagnosticStatus = 'idle' | 'scanning' | 'healthy' | 'warning' | 'error' | 'disabled';
+
+interface DiagnosticNode {
+  status: DiagnosticStatus;
+  detail: string;
+  meta: string;
+}
+
+const describeRuntimeMissing = (runtime: ApiRuntimeStatus) =>
+  runtime.missingConfig.length > 0
+    ? runtime.missingConfig.join(', ')
+    : 'VITE_API_BASE_URL';
 
 export default function Admin() {
-  const { user, isAdmin, loading, login, logout } = useAuth();
-  const [hasAttemptedAutoLogin, setHasAttemptedAutoLogin] = useState(false);
-
-  useEffect(() => {
-    if (!loading && !user && !hasAttemptedAutoLogin) {
-      setHasAttemptedAutoLogin(true);
-      // Attempt auto-login, but be aware it might be blocked by popup blockers
-      // We don't await it to prevent blocking the UI
-      login().catch(err => console.log("Auto-login blocked or failed:", err));
-    }
-  }, [loading, user, hasAttemptedAutoLogin, login]);
-
-  const isOwner = user?.email === 'loop69org@gmail.com';
-  const effectiveIsAdmin = isAdmin || isOwner;
+  const { user, isAdmin, loading, authMode, login, logout } = useAuth();
+  const [adminPassword, setAdminPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
 
   const importProducts = useStore(state => state.importProducts);
   const products = useStore(state => state.products);
   const updateProduct = useStore(state => state.updateProduct);
+  const loadCatalogue = useStore(state => state.loadCatalogue);
+  const catalogueLoadStatus = useStore(state => state.catalogueLoadStatus);
+  const catalogueSyncStatus = useStore(state => state.catalogueSyncStatus);
+  const catalogueSource = useStore(state => state.catalogueSource);
+  const catalogueMessage = useStore(state => state.catalogueMessage);
+  const catalogueError = useStore(state => state.catalogueError);
+  const lastCatalogueSyncAt = useStore(state => state.lastCatalogueSyncAt);
   
   const [importStatus, setImportStatus] = useState<'idle' | 'processing' | 'crossref' | 'success' | 'error'>('idle');
   const [importedCount, setImportedCount] = useState(0);
@@ -37,47 +49,161 @@ export default function Admin() {
   const [editedRole, setEditedRole] = useState<string>('');
 
   const [isDiagnosticRunning, setIsDiagnosticRunning] = useState(false);
-  const [systemHealth, setSystemHealth] = useState({ database: 'healthy', storage: 'healthy', email: 'healthy' });
+  const [systemHealth, setSystemHealth] = useState<Record<'catalogueApi' | 'auth' | 'adminWrites', DiagnosticNode>>({
+    catalogueApi: {
+      status: 'idle',
+      detail: 'Not checked yet',
+      meta: 'Run diagnostics',
+    },
+    auth: {
+      status: 'idle',
+      detail: 'Not checked yet',
+      meta: 'Run diagnostics',
+    },
+    adminWrites: {
+      status: 'idle',
+      detail: 'Not checked yet',
+      meta: 'Run diagnostics',
+    },
+  });
 
-  const runDiagnostics = async () => {
+  const runtime = getApiRuntimeStatus();
+
+  const runDiagnostics = useCallback(async () => {
     setIsDiagnosticRunning(true);
-    setSystemHealth({ database: 'scanning', storage: 'scanning', email: 'scanning' });
+    setSystemHealth({
+      catalogueApi: { status: 'scanning', detail: 'Checking Encore catalogue read path...', meta: 'Waiting for probe' },
+      auth: { status: 'scanning', detail: 'Inspecting Encore admin auth state...', meta: 'Waiting for probe' },
+      adminWrites: { status: 'scanning', detail: 'Checking secure admin write path...', meta: 'Waiting for probe' },
+    });
     
     try {
-      // Test Firestore connection
-      const { doc, getDocFromServer } = await import('firebase/firestore');
-      const { db } = await import('../lib/firebase');
-      
+      const liveRuntime = getApiRuntimeStatus();
+
+      const authNode: DiagnosticNode = liveRuntime.enabled
+        ? liveRuntime.adminTokenConfigured
+          ? {
+              status: 'healthy',
+              detail: 'Encore admin credential is configured for this frontend environment.',
+              meta: 'Admin write requests can be authenticated at the API boundary',
+            }
+          : {
+              status: 'warning',
+              detail: `No Encore admin credential is configured. Missing env: ${liveRuntime.missingAdminAuthConfig.join(', ')}`,
+              meta: 'Local admin password only unlocks UI; it does not authorize backend writes',
+            }
+        : {
+            status: 'disabled',
+            detail: `Encore API is disabled. Missing env vars: ${describeRuntimeMissing(liveRuntime)}`,
+            meta: 'API access is unavailable until Encore envs are configured',
+          };
+
+      let catalogueApiNode: DiagnosticNode;
       try {
-        await getDocFromServer(doc(db, 'system', 'connectivity'));
-        setSystemHealth(prev => ({ ...prev, database: 'healthy' }));
-      } catch (err: any) {
-        // If it's just missing document but connection works, it's fine
-        if (err.code === 'not-found') {
-           setSystemHealth(prev => ({ ...prev, database: 'healthy' }));
+        await probeCatalogueRead();
+        catalogueApiNode = {
+          status: 'healthy',
+          detail: 'Encore catalogue read probe succeeded.',
+          meta: liveRuntime.baseUrl || 'Encore API reachable',
+        };
+      } catch (error) {
+        if (error instanceof ApiCapabilityError) {
+          if (error.code === 'api-disabled') {
+            catalogueApiNode = {
+              status: 'disabled',
+              detail: `Encore API is disabled. Missing env vars: ${describeRuntimeMissing(liveRuntime)}`,
+              meta: 'Storefront will fall back to embedded mock catalogue data',
+            };
+          } else if (error.code === 'api-unreachable') {
+            catalogueApiNode = {
+              status: 'error',
+              detail: `Encore backend is unreachable at ${liveRuntime.baseUrl || 'unset backend URL'}.`,
+              meta: 'Likely dead backend, DNS/TLS mismatch, blocked network, or CORS rejection',
+            };
+          } else if (error.code === 'api-route-missing') {
+            catalogueApiNode = {
+              status: 'error',
+              detail: 'Encore backend responded but the catalogue route was not found (404).',
+              meta: 'Backend deployment is likely on the wrong revision or wrong service URL',
+            };
+          } else if (error.code === 'api-server-error') {
+            catalogueApiNode = {
+              status: 'error',
+              detail: `Encore backend returned ${error.status || '5xx'} for the catalogue read probe.`,
+              meta: 'Backend is reachable but unhealthy',
+            };
+          } else {
+            catalogueApiNode = {
+              status: 'error',
+              detail: error.message,
+              meta: 'Encore API responded with a request failure',
+            };
+          }
         } else {
-           const { handleFirestoreError, OperationType } = await import('../lib/firestoreUtils');
-           try {
-             handleFirestoreError(err, OperationType.GET, 'system/connectivity');
-           } catch (handledErr) {
-             console.error('Diagnostics connection error:', handledErr);
-           }
-           setSystemHealth(prev => ({ ...prev, database: 'error' }));
+          catalogueApiNode = {
+            status: 'error',
+            detail: error instanceof Error ? error.message : String(error),
+            meta: 'Encore API is configured but the read probe failed',
+          };
         }
       }
 
-      // Simulate other checks
-      setTimeout(() => {
-        setSystemHealth(prev => ({ ...prev, storage: 'healthy', email: 'healthy' }));
-        setIsDiagnosticRunning(false);
-      }, 1500);
+      const adminWritesNode: DiagnosticNode = !liveRuntime.enabled
+        ? {
+            status: 'disabled',
+            detail: 'Secure admin writes are disabled because the Encore API is not configured.',
+            meta: 'Configure VITE_API_BASE_URL first',
+          }
+        : !liveRuntime.adminTokenConfigured
+          ? {
+              status: 'warning',
+              detail: `Secure admin writes are blocked. Missing env: ${liveRuntime.missingAdminAuthConfig.join(', ')}`,
+              meta: 'Provide backend admin auth before expecting writes to succeed',
+            }
+          : catalogueApiNode.status === 'healthy'
+            ? {
+                status: 'healthy',
+                detail: 'Admin write requests can be sent to the Encore backend.',
+                meta: 'The backend still needs to enforce real admin authorization',
+              }
+            : {
+                status: 'error',
+                detail: 'Admin write path is configured but currently blocked by backend health/reachability.',
+                meta: catalogueApiNode.detail,
+              };
 
+      setSystemHealth({
+        catalogueApi: catalogueApiNode,
+        auth: authNode,
+        adminWrites: adminWritesNode,
+      });
     } catch (error) {
       console.error('Diagnostics failed', error);
-      setSystemHealth({ database: 'error', storage: 'error', email: 'error' });
+      setSystemHealth({
+        catalogueApi: { status: 'error', detail: 'Diagnostics crashed before the catalogue API probe completed.', meta: 'Check console output' },
+        auth: { status: 'error', detail: 'Diagnostics crashed before the admin auth probe completed.', meta: 'Check console output' },
+        adminWrites: { status: 'error', detail: 'Diagnostics crashed before the write probe completed.', meta: 'Check console output' },
+      });
+    } finally {
       setIsDiagnosticRunning(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!loading && user && isAdmin) {
+      void runDiagnostics();
+    }
+  }, [loading, user, isAdmin, runDiagnostics]);
+
+  const nodeStatuses = Object.values(systemHealth).map((node) => node.status);
+  const backendHeaderStatus: 'healthy' | 'warning' | 'error' | 'scanning' =
+    nodeStatuses.includes('error')
+      ? 'error'
+      : nodeStatuses.includes('scanning')
+        ? 'scanning'
+        : nodeStatuses.includes('warning') || nodeStatuses.includes('disabled')
+          ? 'warning'
+          : 'healthy';
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -88,17 +214,22 @@ export default function Admin() {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      complete: (results) => {
+      complete: async (results) => {
         try {
           const validData = results.data.filter((row: any) => row.sku && row.name && row.price);
           
           // Simulate Cross-Reference Engine / Duplicate Detection
           setImportStatus('crossref');
-          
-          setTimeout(() => {
-            importProducts(validData as any[]);
-            setImportedCount(validData.length);
-            setImportStatus('success');
+
+          setTimeout(async () => {
+            try {
+              await importProducts(validData as any[], user?.email || undefined);
+              setImportedCount(validData.length);
+              setImportStatus('success');
+            } catch (error) {
+              console.error(error);
+              setImportStatus('error');
+            }
           }, 1500);
 
         } catch (error) {
@@ -163,6 +294,19 @@ export default function Admin() {
     );
   }
 
+  const handleAdminLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const success = await login(adminPassword);
+
+    if (!success) {
+      setLoginError('Incorrect admin password.');
+      return;
+    }
+
+    setLoginError('');
+    setAdminPassword('');
+  };
+
   if (!user) {
     return (
       <div className="bg-slate-100 min-h-screen flex items-center justify-center p-4 selection:bg-amber-400">
@@ -176,24 +320,52 @@ export default function Admin() {
               <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Authorized Entry Point</p>
             </div>
           </div>
-          <div className="space-y-6">
+          <form onSubmit={handleAdminLogin} className="space-y-6">
             <div className="bg-slate-50 border-2 border-dashed border-slate-200 p-6 rounded-sm text-center">
-              <p className="text-xs font-bold text-slate-600 mb-4 uppercase tracking-tight">Access Restricted to Verified Personnel</p>
-              <button 
-                onClick={login}
-                className="w-full bg-slate-900 text-white font-black uppercase tracking-widest text-[10px] py-4 rounded-sm hover:bg-slate-800 transition-all flex items-center justify-center gap-3 shadow-xl transform active:scale-95"
+              <p className="text-xs font-bold text-slate-600 mb-4 uppercase tracking-tight">Enter Admin Password</p>
+              <input
+                type="text"
+                name="username"
+                autoComplete="username"
+                value="admin"
+                readOnly
+                tabIndex={-1}
+                aria-hidden="true"
+                className="sr-only"
+              />
+              <input
+                type="password"
+                value={adminPassword}
+                onChange={(event) => {
+                  setAdminPassword(event.target.value);
+                  if (loginError) {
+                    setLoginError('');
+                  }
+                }}
+                className="w-full bg-white border-2 border-slate-200 px-4 py-3 text-sm font-bold text-slate-900 rounded-sm focus:outline-none focus:border-slate-900 mb-4"
+                placeholder="Admin password"
+                name="password"
+                autoComplete="current-password"
+              />
+              <button
+                type="submit"
+                className="w-full bg-slate-900 text-white font-black uppercase tracking-widest text-[10px] py-4 rounded-sm hover:bg-slate-800 transition-all shadow-xl transform active:scale-95"
               >
-                <LogIn className="w-4 h-4 text-amber-400" /> Sign In with Google
+                Unlock Admin Portal
               </button>
             </div>
-            <p className="text-[9px] text-center text-slate-400 font-bold uppercase tracking-tighter">Secure encrypted authentication via Google Cloud Identity</p>
-          </div>
+            {loginError ? (
+              <p className="text-[10px] text-center text-red-600 font-black uppercase tracking-widest">{loginError}</p>
+            ) : (
+              <p className="text-[9px] text-center text-slate-400 font-bold uppercase tracking-tighter">Local UI gate only. Firebase auth is separate.</p>
+            )}
+          </form>
         </div>
       </div>
     );
   }
 
-  if (!effectiveIsAdmin) {
+  if (!isAdmin) {
     return (
       <div className="bg-slate-100 min-h-screen flex items-center justify-center p-4">
         <div className="bg-white p-10 rounded-sm shadow-2xl border-4 border-slate-900 max-w-md w-full text-center">
@@ -201,7 +373,7 @@ export default function Admin() {
             <ShieldAlert className="w-10 h-10" />
           </div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-2">Access Revoked</h2>
-          <p className="text-slate-500 font-bold text-sm mb-8">Your account <span className="text-slate-900 italic">({user.email})</span> does not have administrative clearance for this terminal.</p>
+          <p className="text-slate-500 font-bold text-sm mb-8">This admin session is not authorized for this terminal.</p>
           <div className="flex flex-col gap-3">
              <button 
                 onClick={logout}
@@ -277,17 +449,90 @@ export default function Admin() {
             <span className="text-xl font-black italic tracking-tighter text-slate-900 leading-none flex items-center gap-1">
               AUTOCONOMY<span className="text-amber-400">.</span>
             </span>
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-2">Auth mode: {authMode.replace(/_/g, ' ')}</p>
           </div>
           <div className="flex items-center gap-3">
-             <div className="flex items-center gap-2 bg-slate-50 border-2 border-slate-200 text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-sm">
-               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-               System Online
+             <div className={`flex items-center gap-2 border-2 text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-sm ${
+               backendHeaderStatus === 'healthy'
+                 ? 'bg-green-50 border-green-200 text-green-700'
+                 : backendHeaderStatus === 'warning'
+                   ? 'bg-amber-50 border-amber-200 text-amber-700'
+                   : backendHeaderStatus === 'scanning'
+                     ? 'bg-slate-50 border-slate-200 text-slate-700'
+                     : 'bg-red-50 border-red-200 text-red-700'
+             }`}>
+               <span className={`w-2 h-2 rounded-full ${
+                 backendHeaderStatus === 'healthy'
+                   ? 'bg-green-500'
+                   : backendHeaderStatus === 'warning'
+                     ? 'bg-amber-500'
+                     : backendHeaderStatus === 'scanning'
+                       ? 'bg-slate-500 animate-pulse'
+                       : 'bg-red-500'
+               }`}></span>
+               {backendHeaderStatus === 'healthy'
+                 ? 'Backend Healthy'
+                 : backendHeaderStatus === 'warning'
+                   ? 'Backend Partial'
+                   : backendHeaderStatus === 'scanning'
+                     ? 'Diagnostics Running'
+                     : 'Backend At Risk'}
              </div>
              <a href="/" className="bg-slate-900 text-white font-black text-[9px] uppercase tracking-widest px-4 py-2 rounded-sm hover:bg-slate-800 transition-colors">
                Return to Store
              </a>
           </div>
         </header>
+
+        <div className="px-4 md:px-8 xl:px-12 pt-4">
+          <div className={`border-2 rounded-sm px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${
+            catalogueError
+              ? 'border-red-200 bg-red-50'
+              : catalogueSyncStatus === 'saving' || catalogueLoadStatus === 'loading'
+                ? 'border-amber-200 bg-amber-50'
+                : 'border-green-200 bg-green-50'
+          }`}>
+            <div>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${
+                catalogueError ? 'text-red-700' : catalogueSyncStatus === 'saving' || catalogueLoadStatus === 'loading' ? 'text-amber-700' : 'text-green-700'
+              }`}>
+                {catalogueLoadStatus === 'loading'
+                  ? 'Syncing catalogue...'
+                  : catalogueError
+                    ? 'Catalogue sync issue'
+                    : catalogueMessage || 'Catalogue ready'}
+              </p>
+              <p className="text-[10px] font-bold text-slate-500 mt-1 uppercase tracking-widest">
+                Source: {catalogueSource} {lastCatalogueSyncAt ? `· Last sync ${new Date(lastCatalogueSyncAt).toLocaleString()}` : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              {catalogueError && <span className="text-[10px] font-bold text-red-600">{catalogueError}</span>}
+              <button
+                onClick={() => void loadCatalogue(true)}
+                disabled={catalogueLoadStatus === 'loading' || catalogueSyncStatus === 'saving'}
+                className="bg-slate-900 text-amber-400 disabled:opacity-50 font-black text-[9px] uppercase tracking-widest px-4 py-2 rounded-sm hover:bg-slate-800 transition-colors"
+              >
+                {catalogueLoadStatus === 'loading' ? 'Syncing...' : 'Refresh Catalogue'}
+              </button>
+            </div>
+          </div>
+          <div className={`mt-3 border-2 rounded-sm px-4 py-3 ${
+            runtime.enabled ? 'border-slate-200 bg-white' : 'border-amber-200 bg-amber-50'
+          }`}>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-700">Encore Backend Target</p>
+            <p className="text-[11px] font-mono text-slate-900 mt-1 break-all">
+              {runtime.baseUrl || 'MISSING: VITE_API_BASE_URL'}
+            </p>
+            <p className="text-[10px] font-bold text-slate-500 mt-2 uppercase tracking-widest">
+              {runtime.enabled
+                ? runtime.adminTokenConfigured
+                  ? 'Admin token configured for browser write calls'
+                  : `Missing env: ${runtime.missingAdminAuthConfig.join(', ')}`
+                : `Missing env: ${describeRuntimeMissing(runtime)}`}
+            </p>
+          </div>
+        </div>
 
         {/* Scrollable Content */}
         <div className="flex-grow p-4 md:p-8 xl:p-12 overflow-y-auto">
@@ -343,23 +588,28 @@ export default function Admin() {
                   </h2>
                   <div className="space-y-6 flex-grow">
                      {[
-                       { name: 'Global Database', status: systemHealth.database, ping: '24ms' },
-                       { name: 'Storage Engine', status: systemHealth.storage, ping: '12ms' },
-                       { name: 'Mail Dispatch', status: systemHealth.email, ping: '156ms' }
+                       { name: 'Catalogue API', node: systemHealth.catalogueApi },
+                       { name: 'Admin Auth', node: systemHealth.auth },
+                       { name: 'Admin Writes', node: systemHealth.adminWrites },
                      ].map((node, i) => (
                        <div key={i} className="flex items-center justify-between">
                          <div>
                            <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{node.name}</p>
-                           <p className="text-[9px] font-mono text-slate-400 uppercase mt-0.5">{node.ping} latency</p>
+                           <p className="text-[9px] font-mono text-slate-400 uppercase mt-0.5">{node.node.meta}</p>
+                           <p className="text-[10px] font-bold text-slate-500 mt-1 normal-case tracking-normal">{node.node.detail}</p>
                          </div>
                          <div className="flex items-center gap-2">
                            <span className={`text-[8px] font-black uppercase tracking-widest ${
-                             node.status === 'healthy' ? 'text-green-600' : 
-                             node.status === 'scanning' ? 'text-amber-500 animate-pulse' : 'text-red-500'
-                           }`}>{node.status}</span>
+                             node.node.status === 'healthy' ? 'text-green-600' :
+                             node.node.status === 'warning' ? 'text-amber-600' :
+                             node.node.status === 'disabled' ? 'text-slate-500' :
+                             node.node.status === 'scanning' ? 'text-amber-500 animate-pulse' : 'text-red-500'
+                           }`}>{node.node.status}</span>
                            <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_rgba(0,0,0,0.1)] ${
-                             node.status === 'healthy' ? 'bg-green-500 shadow-green-500/50' : 
-                             node.status === 'scanning' ? 'bg-amber-400 animate-ping' : 'bg-red-500 shadow-red-500/50'
+                             node.node.status === 'healthy' ? 'bg-green-500 shadow-green-500/50' :
+                             node.node.status === 'warning' ? 'bg-amber-500 shadow-amber-500/50' :
+                             node.node.status === 'disabled' ? 'bg-slate-400 shadow-slate-400/50' :
+                             node.node.status === 'scanning' ? 'bg-amber-400 animate-ping' : 'bg-red-500 shadow-red-500/50'
                            }`}></div>
                          </div>
                        </div>
@@ -375,7 +625,7 @@ export default function Admin() {
                           ) : (
                             <RefreshCw className="w-3 h-3" />
                           )}
-                          {isDiagnosticRunning ? 'Running Diagnostics...' : 'Deep System Scan'}
+                          {isDiagnosticRunning ? 'Running Diagnostics...' : 'Run Encore Diagnostics'}
                         </button>
                      </div>
                   </div>
@@ -546,6 +796,7 @@ export default function Admin() {
                      {importStatus === 'crossref' && <div className="w-4 h-4 border-2 border-slate-900 border-t-amber-400 animate-spin rounded-sm" title="Cross-referencing..."></div>}
                      {importStatus === 'success' && <span className="text-green-600 font-bold text-[10px] uppercase tracking-widest px-2">{importedCount} added</span>}
                      {importStatus === 'error' && <span className="text-red-600 font-bold text-[10px] uppercase tracking-widest px-2">Import Failed</span>}
+                     {catalogueSyncStatus === 'saving' && <span className="text-amber-600 font-bold text-[10px] uppercase tracking-widest px-2">Saving...</span>}
 
                      <label className="flex items-center gap-2 cursor-pointer bg-amber-400 hover:bg-amber-500 text-slate-900 transition-colors py-2 px-4 rounded-sm shadow-sm border-2 border-transparent">
                        <Upload className="w-4 h-4" />
@@ -627,13 +878,18 @@ export default function Admin() {
                                  </div>
                                  <div className="flex gap-2">
                                    <button 
-                                     onClick={() => {
-                                       updateProduct(product.id, { stock: editedStock, price: editedPrice });
-                                       setEditingProduct(null);
+                                     onClick={async () => {
+                                       try {
+                                         await updateProduct(product.id, { stock: editedStock, price: editedPrice }, user?.email || undefined);
+                                         setEditingProduct(null);
+                                       } catch (error) {
+                                         console.error('Product save failed', error);
+                                       }
                                      }}
+                                     disabled={catalogueSyncStatus === 'saving'}
                                      className="bg-slate-900 text-amber-400 text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-sm flex items-center gap-1"
                                    >
-                                     <Save className="w-3 h-3" /> Update
+                                     <Save className="w-3 h-3" /> {catalogueSyncStatus === 'saving' ? 'Saving...' : 'Update'}
                                    </button>
                                    <button 
                                      onClick={() => setEditingProduct(null)}
@@ -1213,4 +1469,3 @@ export default function Admin() {
     </div>
   );
 }
-

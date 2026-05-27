@@ -9,7 +9,7 @@ Zyntric Motors is a South African automotive parts storefront prototype focused 
 - TypeScript
 - Tailwind CSS
 - Zustand
-- Firebase Auth / Firestore wiring
+- Encore-backed catalogue API seam
 
 ## Phase 1 vehicle identity layer
 
@@ -76,11 +76,33 @@ VIN decoding identifies the vehicle. It does not guarantee exact part compatibil
 npm install
 ```
 
-2. Add local environment values as needed:
+2. Local environment variables are optional:
 
 ```bash
 cp .env.example .env.local
 ```
+
+No Gemini key is required.
+If you want to change the local admin portal password, set `VITE_ADMIN_PASSWORD` in `.env.local`.
+If you want a real Encore-backed deployment, set the Encore envs from `.env.example`.
+
+## Catalogue persistence
+
+Phase 3C loads catalogue products from the Encore catalogue API into Zustand on startup and falls back to the embedded mock catalogue when the backend is disabled, misconfigured, empty, or unavailable.
+
+Admin catalogue edits now attempt to persist:
+
+- product price/stock updates
+- fitment rule create/update/delete
+- fitment rule review status updates
+- CSV catalogue imports
+
+Important: the current admin portal password gate is only a frontend convenience layer. Encore still requires authenticated admin writes. If the backend auth path is missing, catalogue writes will fail.
+Important: the current admin portal password gate is only a frontend convenience layer. Encore must still enforce authenticated admin writes at the backend.
+
+This repo no longer depends on Firebase project wiring. If `VITE_API_BASE_URL` is absent, the storefront still runs in mock-data mode and admin diagnostics will say so explicitly.
+
+See [docs/encore-deployment.md](docs/encore-deployment.md) for the exact Encore endpoints and contracts a real Zyntric deployment still needs.
 
 3. Run the app:
 
@@ -102,7 +124,7 @@ Phase 3 should turn the mock fitment system into an operational backend:
 Supplier CSV/import
   -> normalized products
   -> fitmentRules
-  -> Firestore/API persistence
+  -> Encore/API persistence
   -> admin correction workflow
 ```
 
