@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const ADMIN_SESSION_KEY = 'zyntric-admin-session';
-const DEFAULT_ADMIN_PASSWORD = 'zyntric-admin';
+const DEFAULT_ADMIN_PASSWORD = 'admin';
 
 interface AdminUser {
   email: string;
