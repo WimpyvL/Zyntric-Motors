@@ -33,6 +33,12 @@ export const buildVehicleDisplayName = (vehicle: VehicleProfile | null): string 
     vehicle.engineName,
   ].filter(Boolean);
 
+  // Append engine capacity if not already represented in engineName
+  if (vehicle.engineCapacityCc && !vehicle.engineName) {
+    const liters = (vehicle.engineCapacityCc / 1000).toFixed(1);
+    parts.push(`${parseFloat(liters)}L`);
+  }
+
   return parts.join(' ');
 };
 
