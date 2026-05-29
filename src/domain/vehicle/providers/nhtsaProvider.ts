@@ -10,6 +10,8 @@ interface NhtsaDecodeResponse {
     ModelYear?: string;
     Trim?: string;
     DisplacementCC?: string;
+    DisplacementL?: string;
+    EngineCylinders?: string;
     FuelTypePrimary?: string;
     BodyClass?: string;
     EngineModel?: string;
@@ -69,6 +71,34 @@ const parseNhtsaErrorCodes = (value?: string): string[] => {
 const resolveManufacturerFromWmi = (vin: string): string | undefined => {
   const wmi = vin.slice(0, 3).toUpperCase();
   return MANUFACTURER_BY_WMI_PREFIX[wmi];
+};
+
+const buildEngineSizeLabel = (
+  displacementCc?: number,
+  displacementL?: string,
+  cylinders?: string,
+): string | undefined => {
+  const liters = displacementL ? parseFloat(displacementL) : displacementCc ? displacementCc / 1000 : undefined;
+  if (!liters || !Number.isFinite(liters)) return undefined;
+
+  const litersFormatted = liters % 1 === 0 ? `${liters.toFixed(1)}L` : `${parseFloat(liters.toFixed(1))}L`;
+  const cylinderSuffix = cylinders && /^\d+$/.test(cylinders) ? ` ${cylinders}-cyl` : '';
+  return `${litersFormatted}${cylinderSuffix}`;
+};
+
+const buildEngineDisplayName = (
+  engineModel?: string,
+  displacementCc?: number,
+  displacementL?: string,
+  cylinders?: string,
+): string | undefined => {
+  const sizeLabel = buildEngineSizeLabel(displacementCc, displacementL, cylinders);
+  const model = engineModel?.trim();
+
+  if (model && sizeLabel) return `${sizeLabel} ${model}`;
+  if (sizeLabel) return sizeLabel;
+  if (model) return model;
+  return undefined;
 };
 
 export const nhtsaProvider: VehicleIdentityProvider = {
@@ -152,6 +182,14 @@ export const nhtsaProvider: VehicleIdentityProvider = {
       );
     }
 
+    const engineCapacityCc = toNumber(decoded.DisplacementCC);
+    const engineDisplayName = buildEngineDisplayName(
+      sanitizeDecodedValue(decoded.EngineModel),
+      engineCapacityCc,
+      sanitizeDecodedValue(decoded.DisplacementL),
+      sanitizeDecodedValue(decoded.EngineCylinders),
+    );
+
     return {
       vehicle: {
         vin: validation.normalizedVin,
@@ -159,8 +197,8 @@ export const nhtsaProvider: VehicleIdentityProvider = {
         model: model || 'Unknown',
         year,
         variant: sanitizeDecodedValue(decoded.Trim),
-        engineName: sanitizeDecodedValue(decoded.EngineModel),
-        engineCapacityCc: toNumber(decoded.DisplacementCC),
+        engineName: engineDisplayName,
+        engineCapacityCc,
         fuelType: sanitizeDecodedValue(decoded.FuelTypePrimary),
         bodyType: sanitizeDecodedValue(decoded.BodyClass),
         source: 'vin',
