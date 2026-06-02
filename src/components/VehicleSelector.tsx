@@ -163,13 +163,27 @@ export default function VehicleSelector() {
       }
 
       const vehicle = result.vehicle;
-      setSelectedMake(vehicle.make || '');
-      setSelectedModel(vehicle.model || '');
+      const decodedMake = vehicle.make === 'Unknown' ? '' : vehicle.make;
+      const decodedModel = vehicle.model === 'Unknown' ? '' : vehicle.model;
+
+      setSelectedMake(decodedMake);
+      setSelectedModel(decodedModel);
       setSelectedYear(vehicle.year?.toString() || '');
       setSelectedEngine(vehicle.engineName || '');
-      setSelectedVehicle(vehicle);
+
+      if (decodedMake && decodedModel) {
+        setSelectedVehicle(vehicle);
+      } else {
+        clearSelectedVehicle();
+        setActiveStep(!decodedMake ? 'make' : 'model');
+      }
+
       setVin('');
-      setVinError('');
+      setVinError(
+        !decodedMake || !decodedModel
+          ? 'VIN DECODED — PLEASE COMPLETE MISSING FIELDS BELOW.'
+          : '',
+      );
       setIsDecoding(false);
     } catch (error) {
       console.error('VIN Decode Error:', error);
